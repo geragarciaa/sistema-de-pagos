@@ -162,6 +162,10 @@ def test_run_basic_functionality():
         
         # Verify output file content matches result DataFrame
         output_df = pd.read_csv(output_path)
+        # Handle NaN values in reasons column by converting to empty strings
+        output_df["reasons"] = output_df["reasons"].fillna("")
+        result_df["reasons"] = result_df["reasons"].fillna("")
+        
         pd.testing.assert_frame_equal(result_df, output_df)
         
     finally:
