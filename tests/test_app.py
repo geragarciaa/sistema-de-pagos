@@ -83,3 +83,29 @@ def test_transaction_hard_block_rejection():
     data = r.json()
     assert data["transaction_id"] == 99
     assert data["decision"] == "REJECTED"
+
+
+def test_transaction_accepted_path():
+    """Typical low-risk physical transaction from trusted user during day -> ACCEPTED."""
+    body = {
+        "transaction_id": 7,
+        "amount_mxn": 1500.0,
+        "customer_txn_30d": 5,
+        "geo_state": "Jalisco",
+        "device_type": "desktop",
+        "chargeback_count": 0,
+        "hour": 14,
+        "product_type": "physical",
+        "latency_ms": 80,
+        "user_reputation": "trusted",
+        "device_fingerprint_risk": "low",
+        "ip_risk": "low",
+        "email_risk": "low",
+        "bin_country": "MX",
+        "ip_country": "MX"
+    }
+    r = client.post("/transaction", json=body)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["transaction_id"] == 7
+    assert data["decision"] == "ACCEPTED"
