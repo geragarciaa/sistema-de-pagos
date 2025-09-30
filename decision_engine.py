@@ -51,6 +51,40 @@ def high_amount(amount: float, product_type: str, thresholds: Dict[str, Any]) ->
     t = thresholds.get(product_type, thresholds.get("_default"))
     return amount >= t
 
+def _process_categorical_risks(row: pd.Series, cfg: Dict[str, Any]) -> tuple[int, List[str]]:
+    """Process categorical risk fields and return score and reasons."""
+    score = 0
+    reasons = []
+    
+    for field, mapping in [("ip_risk", cfg["score_weights"]["ip_risk"]),
+                           ("email_risk", cfg["score_weights"]["email_risk"]),
+                           ("device_fingerprint_risk", cfg["score_weights"]["device_fingerprint_risk"])]:
+        val = str(row.get(field, "low")).lower()
+        add = mapping.get(val, 0)
+        score += add
+        if add:
+            reasons.append(f"{field}:{val}(+{add})")
+    
+    return score, reasons
+
+def _process_amount_and_new_user_risk(row: pd.Series, cfg: Dict[str, Any], rep: str) -> tuple[int, List[str]]:
+    """Process high amount risk and new user bonus."""
+    score = 0
+    reasons = []
+    
+    amount = float(row.get("amount_mxn", 0.0))
+    ptype = str(row.get("product_type", "_default")).lower()
+    if high_amount(amount, ptype, cfg["amount_thresholds"]):
+        add = cfg["score_weights"]["high_amount"]
+        score += add
+        reasons.append(f"high_amount:{ptype}:{amount}(+{add})")
+        if rep == "new":
+            add2 = cfg["score_weights"]["new_user_high_amount"]
+            score += add2
+            reasons.append(f"new_user_high_amount(+{add2})")
+    
+    return score, reasons
+
 def assess_row(row: pd.Series, cfg: Dict[str, Any]) -> Dict[str, Any]:
     score = 0
     reasons: List[str] = []
@@ -61,14 +95,9 @@ def assess_row(row: pd.Series, cfg: Dict[str, Any]) -> Dict[str, Any]:
         return {"decision": DECISION_REJECTED, "risk_score": 100, "reasons": ";".join(reasons)}
 
     # Categorical risks
-    for field, mapping in [("ip_risk", cfg["score_weights"]["ip_risk"]),
-                           ("email_risk", cfg["score_weights"]["email_risk"]),
-                           ("device_fingerprint_risk", cfg["score_weights"]["device_fingerprint_risk"])]:
-        val = str(row.get(field, "low")).lower()
-        add = mapping.get(val, 0)
-        score += add
-        if add:
-            reasons.append(f"{field}:{val}(+{add})")
+    cat_score, cat_reasons = _process_categorical_risks(row, cfg)
+    score += cat_score
+    reasons.extend(cat_reasons)
 
     # Reputation
     rep = str(row.get("user_reputation", "new")).lower()
@@ -93,16 +122,9 @@ def assess_row(row: pd.Series, cfg: Dict[str, Any]) -> Dict[str, Any]:
         reasons.append(f"geo_mismatch:{bin_c}!={ip_c}(+{add})")
 
     # High amount for product type
-    amount = float(row.get("amount_mxn", 0.0))
-    ptype = str(row.get("product_type", "_default")).lower()
-    if high_amount(amount, ptype, cfg["amount_thresholds"]):
-        add = cfg["score_weights"]["high_amount"]
-        score += add
-        reasons.append(f"high_amount:{ptype}:{amount}(+{add})")
-        if rep == "new":
-            add2 = cfg["score_weights"]["new_user_high_amount"]
-            score += add2
-            reasons.append(f"new_user_high_amount(+{add2})")
+    amount_score, amount_reasons = _process_amount_and_new_user_risk(row, cfg, rep)
+    score += amount_score
+    reasons.extend(amount_reasons)
 
     # Extreme latency
     lat = int(row.get("latency_ms", 0))
