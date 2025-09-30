@@ -10,6 +10,11 @@ from fastapi.testclient import TestClient
 #   from src.app import app as fastapi_app
 from app import app as fastapi_app
 
+import pandas as pd
+import tempfile
+import os
+from decision_engine import run, DECISION_ACCEPTED, DECISION_IN_REVIEW, DECISION_REJECTED
+
 client = TestClient(fastapi_app)
 
 
@@ -109,3 +114,59 @@ def test_transaction_accepted_path():
     data = r.json()
     assert data["transaction_id"] == 7
     assert data["decision"] == "ACCEPTED"
+
+def test_run_basic_functionality():
+    """Test basic functionality of run() with sample CSV data."""
+    # Create test data
+    test_data = pd.DataFrame({
+        'transaction_id': [1, 2, 3],
+        'amount_mxn': [1000.0, 5000.0, 10000.0],
+        'customer_txn_30d': [1, 5, 0],
+        'chargeback_count': [0, 0, 1],
+        'hour': [12, 23, 14],
+        'product_type': ['digital', 'physical', 'subscription'],
+        'latency_ms': [100, 200, 3000],
+        'user_reputation': ['new', 'trusted', 'high_risk'],
+        'device_fingerprint_risk': ['low', 'medium', 'high'],
+        'ip_risk': ['low', 'medium', 'high'],
+        'email_risk': ['low', 'medium', 'high'],
+        'bin_country': ['MX', 'MX', 'US'],
+        'ip_country': ['MX', 'US', 'MX']
+    })
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as input_file:
+        input_path = input_file.name
+        test_data.to_csv(input_path, index=False)
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as output_file:
+        output_path = output_file.name
+    
+    try:
+        # Run the function
+        result_df = run(input_path, output_path)
+        
+        # Verify the result DataFrame has expected columns
+        assert 'decision' in result_df.columns
+        assert 'risk_score' in result_df.columns
+        assert 'reasons' in result_df.columns
+        
+        # Verify decisions are valid
+        valid_decisions = {DECISION_ACCEPTED, DECISION_IN_REVIEW, DECISION_REJECTED}
+        assert all(decision in valid_decisions for decision in result_df['decision'])
+        
+        # Verify risk scores are integers
+        assert all(isinstance(score, (int, float)) for score in result_df['risk_score'])
+        
+        # Verify output file was created
+        assert os.path.exists(output_path)
+        
+        # Verify output file content matches result DataFrame
+        output_df = pd.read_csv(output_path)
+        pd.testing.assert_frame_equal(result_df, output_df)
+        
+    finally:
+        # Cleanup
+        if os.path.exists(input_path):
+            os.unlink(input_path)
+        if os.path.exists(output_path):
+            os.unlink(output_path)
